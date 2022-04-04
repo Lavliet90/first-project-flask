@@ -1,6 +1,8 @@
-from flask import Flask, render_template, url_for, request, flash, session, redirect, abort
+from flask import Flask, render_template, url_for, request, flash, session, redirect, abort, g
 import sqlite3
 import os
+
+from FDataBase import FDataBase
 
 DATABASE = '/tmp/flsite.db'
 DEBUG = True
@@ -30,10 +32,51 @@ menu = [{'name': 'Upload', 'url': 'install-flask'},
         {'name': 'Contact', 'url': 'contact'}]
 
 
+def get_db():
+    if not hasattr(g, 'link_db'):
+        g.link_db = connect_db()
+    return g.link_db
+
+
 @app.route('/')
 def index():
-    print(url_for('index'))
-    return render_template('index.html', menu=menu)
+    db = get_db()
+    dbase = FDataBase(db)
+    return render_template('index.html', menu=dbase.getMenu(), posts=dbase.getPostsAnonce())
+
+
+@app.route('/add_post', methods=['POST', 'GET'])
+def addPost():
+    db = get_db()
+    dbase = FDataBase(db)
+
+    if request.method == 'POST':
+        if len(request.form['name']) > 4 and len(request.form['post']) > 10:
+            res = dbase.addPost(request.form['name'], request.form['post'], request.form['url'])
+            if not res:
+                flash('Error add post', category='error')
+            else:
+                flash('Success add page', category='success')
+        else:
+            flash('Error add post', category='error')
+
+    return render_template('add_post.html', menu=dbase.getMenu(), title='Add page')
+
+
+@app.route('/post/<alias>')
+def showPost(alias):
+    db = get_db()
+    dbase = FDataBase(db)
+    title, post = dbase.getPost(alias)
+    if not title:
+        abort(404)
+
+    return render_template('post.html', menu=dbase.getMenu(), title=title, post=post)
+
+@app.teardown_appcontext
+def close_db(error):
+    if hasattr(g, 'link_db'):
+        g.link_db.close()
 
 
 @app.route('/about')
