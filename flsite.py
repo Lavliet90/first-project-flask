@@ -1,8 +1,11 @@
-from flask import Flask, render_template, url_for, request, flash, session, redirect, abort, g
+from flask import Flask, render_template, url_for, request, flash, session, redirect, abort, g, make_response
 import sqlite3
 import os
 
+from UserLogin import UserLogin
 from FDataBase import FDataBase
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_login import LoginManager, login_user, login_required, current_user, logout_user
 
 DATABASE = '/tmp/flsite.db'
 DEBUG = True
@@ -11,6 +14,17 @@ app = Flask(__name__)
 app.config.from_object(__name__)
 
 app.config.update(dict(DATABASE=os.path.join(app.root_path, 'flsite.db')))
+
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
+login_manager.login_message = 'Log in to access restricted pages'
+login_manager.login_message_category = 'success'
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    print('load_user')
+    return UserLogin().fromDB(user_id, dbase)
 
 
 def connect_db():
@@ -40,16 +54,11 @@ def get_db():
 
 @app.route('/')
 def index():
-    db = get_db()
-    dbase = FDataBase(db)
     return render_template('index.html', menu=dbase.getMenu(), posts=dbase.getPostsAnonce())
 
 
 @app.route('/add_post', methods=['POST', 'GET'])
 def addPost():
-    db = get_db()
-    dbase = FDataBase(db)
-
     if request.method == 'POST':
         if len(request.form['name']) > 4 and len(request.form['post']) > 10:
             res = dbase.addPost(request.form['name'], request.form['post'], request.form['url'])
@@ -64,14 +73,24 @@ def addPost():
 
 
 @app.route('/post/<alias>')
+@login_required
 def showPost(alias):
-    db = get_db()
-    dbase = FDataBase(db)
     title, post = dbase.getPost(alias)
     if not title:
         abort(404)
 
     return render_template('post.html', menu=dbase.getMenu(), title=title, post=post)
+
+
+dbase = None
+
+
+@app.before_request
+def before_request():
+    global dbase
+    db = get_db()
+    dbase = FDataBase(db)
+
 
 @app.teardown_appcontext
 def close_db(error):
@@ -87,13 +106,39 @@ def about():
 
 @app.route('/login', methods=['POST', 'GET'])
 def login():
-    if 'userLogged' in session:
-        return redirect(url_for('profile', username=session['userLogger']))
-    elif request.method == 'POST' and request.form['username'] == 'yan' and request.form['psw'] == '123':
-        session['userLogged'] = request.form['username']
-        return redirect(url_for('profile', username=session['userLogged']))
+    if current_user.is_authenticated:
+        return redirect(url_for('profile'))
 
-    return render_template('login.html', title='Log in', menu=menu)
+    if request.method == 'POST':
+        user = dbase.getUserByEmail(request.form['email'])
+        if user and check_password_hash(user['psw'], request.form['psw']):
+            userlogin = UserLogin().create(user)
+            rm = True if request.form.get('remainme') else False
+            login_user(userlogin, remember=rm)
+            return redirect(request.args.get('next') or url_for('profile'))
+
+        flash('Invalid username/password pair', 'error')
+
+    return render_template('login.html', title='Login', menu=dbase.getMenu())
+
+
+@app.route('/register', methods=['POST', 'GET'])
+def register():
+    if request.method == 'POST':
+        if len(request.form['name']) > 4 and len(request.form['email']) > 4 \
+                and len(request.form['psw']) > 4 and request.form['psw'] == request.form['psw2']:
+            hash = generate_password_hash(request.form['psw'])
+            res = dbase.addUser(request.form['name'], request.form['email'], hash)
+            if res:
+                flash('Yoy have successfully registered', 'success')
+                return redirect(url_for('login'))
+            else:
+                flash('Error add to db', 'error')
+        else:
+            flash('Fields filled out incorrectly', 'error')
+    return render_template('register.html', menu=dbase.getMenu(), title='Registration')
+
+    return render_template('register.html', menu=dbase.getMenu(), title='Registration')
 
 
 @app.route('/contact', methods=['POST', 'GET'])
@@ -109,11 +154,19 @@ def contact():
     return render_template('contact.html', title='Contact', menu=menu)
 
 
-@app.route('/profile/<username>')
-def profile(username):
-    if 'userLogged' not in session or session['userLogged'] != username:
-        abort(401)
-    return f'User: {username}'
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash('You are logout', 'success')
+    return redirect(url_for('login'))
+
+
+@app.route('/profile')
+@login_required
+def profile():
+    return f"""<p><a href='{url_for('logout')}'>Sign out</a>
+                <p>user info: {current_user.get_id()}"""
 
 
 @app.errorhandler(404)
