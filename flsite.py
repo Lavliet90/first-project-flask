@@ -10,6 +10,8 @@ from flask_login import LoginManager, login_user, login_required, current_user, 
 DATABASE = '/tmp/flsite.db'
 DEBUG = True
 SECRET_KEY = 'fwegwqg23r2fwr3r89jsfioejf29i2fjwlkjfq'
+MAX_CONTENT_LENGTH = 1024 * 1024
+
 app = Flask(__name__)
 app.config.from_object(__name__)
 
@@ -165,8 +167,19 @@ def logout():
 @app.route('/profile')
 @login_required
 def profile():
-    return f"""<p><a href='{url_for('logout')}'>Sign out</a>
-                <p>user info: {current_user.get_id()}"""
+    return render_template('profile.html', menu=dbase.getMenu(), title='Profile')
+
+
+@app.route('/userava')
+@login_required
+def userava():
+    img = current_user.getAvatar(app)
+    if not img:
+        return ''
+
+    h = make_response(img)
+    h.headers['Content-Type'] = 'image/png'
+    return h
 
 
 @app.errorhandler(404)
