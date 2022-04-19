@@ -6,6 +6,8 @@ from UserLogin import UserLogin
 from FDataBase import FDataBase
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_login import LoginManager, login_user, login_required, current_user, logout_user
+from forms import LoginForm, RegisterForm
+from admin.admin import admin
 
 DATABASE = '/tmp/flsite.db'
 DEBUG = True
@@ -16,6 +18,8 @@ app = Flask(__name__)
 app.config.from_object(__name__)
 
 app.config.update(dict(DATABASE=os.path.join(app.root_path, 'flsite.db')))
+
+app.register_blueprint(admin, url_prefix='/admin')
 
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
@@ -110,37 +114,33 @@ def about():
 def login():
     if current_user.is_authenticated:
         return redirect(url_for('profile'))
-
-    if request.method == 'POST':
-        user = dbase.getUserByEmail(request.form['email'])
-        if user and check_password_hash(user['psw'], request.form['psw']):
+    form = LoginForm()
+    if form.validate_on_submit():
+        user = dbase.getUserByEmail(form.email.data)
+        if user and check_password_hash(user['psw'], form.psw.data):
             userlogin = UserLogin().create(user)
-            rm = True if request.form.get('remainme') else False
+            rm = form.remember.data
             login_user(userlogin, remember=rm)
             return redirect(request.args.get('next') or url_for('profile'))
 
         flash('Invalid username/password pair', 'error')
 
-    return render_template('login.html', title='Login', menu=dbase.getMenu())
+    return render_template('login.html', menu=dbase.getMenu(), title='Login', form=form)
 
 
 @app.route('/register', methods=['POST', 'GET'])
 def register():
-    if request.method == 'POST':
-        if len(request.form['name']) > 4 and len(request.form['email']) > 4 \
-                and len(request.form['psw']) > 4 and request.form['psw'] == request.form['psw2']:
-            hash = generate_password_hash(request.form['psw'])
-            res = dbase.addUser(request.form['name'], request.form['email'], hash)
-            if res:
-                flash('Yoy have successfully registered', 'success')
-                return redirect(url_for('login'))
-            else:
-                flash('Error add to db', 'error')
+    form = RegisterForm()
+    if form.validate_on_submit():
+        hash = generate_password_hash(form.psw.data)
+        res = dbase.addUser(form.name.data, form.email.data, hash)
+        if res:
+            flash('Yoy have successfully registered', 'success')
+            return redirect(url_for('login'))
         else:
-            flash('Fields filled out incorrectly', 'error')
-    return render_template('register.html', menu=dbase.getMenu(), title='Registration')
+            flash('Error add to db', 'error')
 
-    return render_template('register.html', menu=dbase.getMenu(), title='Registration')
+    return render_template('register.html', menu=dbase.getMenu(), title='Registration', form=form)
 
 
 @app.route('/contact', methods=['POST', 'GET'])
@@ -180,6 +180,26 @@ def userava():
     h = make_response(img)
     h.headers['Content-Type'] = 'image/png'
     return h
+
+
+@app.route('/upload', methods=['POST', 'GET'])
+@login_required
+def upload():
+    if request.method == 'POST':
+        file = request.files['file']
+        if file and current_user.verifyExt(file.filename):
+            try:
+                img = file.read()
+                res = dbase.updateUserAvatar(img, current_user.get_id())
+                if not res:
+                    flash('Error upload avatar', 'error')
+                flash('Avatar upload', 'success')
+            except FileNotFoundError as e:
+                flash('Error riding file', 'error')
+        else:
+            flash('Error upload avatar', 'error')
+
+    return redirect(url_for('profile'))
 
 
 @app.errorhandler(404)
