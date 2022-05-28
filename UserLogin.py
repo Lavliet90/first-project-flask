@@ -1,6 +1,7 @@
 from flask import url_for
 from flask_login import UserMixin
 
+
 class UserLogin(UserMixin):
     def fromDB(self, user_id, db):
         self.__user = db.getUser(user_id)
@@ -15,7 +16,6 @@ class UserLogin(UserMixin):
 
     def getName(self):
         return self.__user['name'] if self.__user else 'Withour name'
-
 
     def getEmail(self):
         return self.__user['email'] if self.__user else 'Withour email'
